@@ -1,0 +1,16 @@
+---
+- name: Installer les paquets prérequis pour RKE2 (RedHat/Rocky/CentOS)
+  ansible.builtin.package:
+    name:
+      - iptables
+      - iptables-services
+    state: present
+  when: ansible_os_family == 'RedHat'
+
+- name: Installer les paquets prérequis pour RKE2 (Debian/Ubuntu)
+  ansible.builtin.package:
+    name:
+      - iptables
+      - iptables-persistent
+    state: present
+  when: ansible_os_family == 'Debian'

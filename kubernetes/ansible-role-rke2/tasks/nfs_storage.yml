@@ -1,0 +1,17 @@
+---
+- name: Update apt cache
+  become: true
+  ansible.builtin.apt:
+    update_cache: true
+  when: ansible_pkg_mgr == 'apt'
+
+- name: Update dnf/yum cache
+  become: true
+  ansible.builtin.yum:
+    update_cache: true
+  when: ansible_pkg_mgr == 'dnf' or ansible_pkg_mgr == 'yum'
+
+- name: Install packages nfs
+  become: true
+  ansible.builtin.package:
+    name: nfs-utils

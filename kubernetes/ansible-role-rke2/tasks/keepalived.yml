@@ -1,0 +1,81 @@
+---
+- name: Mettre à jour le cache apt
+  ansible.builtin.apt:
+    update_cache: true
+  when: ansible_facts['pkg_mgr'] == 'apt'
+
+- name: Mettre à jour le cache dnf
+  ansible.builtin.dnf:
+    update_cache: true
+  when: ansible_facts['pkg_mgr'] == 'dnf'
+
+- name: Installer les paquets
+  ansible.builtin.package:
+    name: keepalived
+
+- name: Créer le répertoire pour keepalived
+  ansible.builtin.file:
+    path: /etc/keepalived
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Créer le script de vérification de santé de l'API Kubernetes pour la famille Debian
+  ansible.builtin.template:
+    src: templates/check_apiserver.sh.j2
+    dest: /etc/keepalived/check_apiserver.sh
+    owner: root
+    group: root
+    mode: 0755
+  when: ansible_facts['os_family'] == "Debian"
+  notify: Restart keepalived
+
+- name: Créer le script de vérification de santé de l'API Kubernetes pour la famille RedHat
+  ansible.builtin.template:
+    src: templates/check_apiserver.sh.j2
+    dest: /usr/libexec/keepalived/check_apiserver.sh
+    owner: root
+    group: root
+    mode: 0755
+  when: ansible_facts['os_family'] == "RedHat"
+  notify: Restart keepalived
+
+- name: Créer le script de vérification de santé du serveur RKE2 pour la famille Debian
+  ansible.builtin.template:
+    src: templates/check_rke2server.sh.j2
+    dest: /etc/keepalived/check_rke2server.sh
+    owner: root
+    group: root
+    mode: 0755
+  when: ansible_facts['os_family'] == "Debian"
+  notify: Restart keepalived
+
+- name: Créer le script de vérification de santé du serveur RKE2 pour la famille RedHat
+  ansible.builtin.template:
+    src: templates/check_rke2server.sh.j2
+    dest: /usr/libexec/keepalived/check_rke2server.sh
+    owner: root
+    group: root
+    mode: 0755
+  when: ansible_facts['os_family'] == "RedHat"
+  notify: Restart keepalived
+
+- name: Créer le fichier de configuration keepalived
+  ansible.builtin.template:
+    src: templates/keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: Restart keepalived
+
+- name: Activer keepalived et s'assurer qu'il n'est pas masqué
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: yes
+    masked: no
+  notify: Restart keepalived
+
+- name: Vider les gestionnaires
+  ansible.builtin.meta: flush_handlers

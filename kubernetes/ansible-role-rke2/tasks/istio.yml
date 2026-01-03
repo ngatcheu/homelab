@@ -1,0 +1,28 @@
+---
+- name: Créer le répertoire des manifestes RKE2
+  ansible.builtin.file:
+    state: directory
+    path: "{{ rke2_data_path }}/server/manifests"
+    owner: root
+    group: root
+    mode: 0700
+
+- name: Créer le namespace istio-system
+  ansible.builtin.copy:
+    content: |
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: istio-system
+    dest: "{{ rke2_data_path }}/server/manifests/istio-namespace.yaml"
+    owner: root
+    group: root
+    mode: 0664
+
+- name: Copier les fichiers Istio vers le premier serveur
+  ansible.builtin.template:
+    src: "templates/istio-config.yml.j2"
+    dest: "{{ rke2_data_path }}/server/manifests/rke2-istio-config.yaml"
+    owner: root
+    group: root
+    mode: 0664

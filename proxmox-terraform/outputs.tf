@@ -46,6 +46,17 @@ output "payload_vm_ids" {
   ]
 }
 
+# ===== SERVICES VMs =====
+output "cicd_vm_name" {
+  description = "Nom de la VM CI/CD"
+  value       = proxmox_virtual_environment_vm.cicd.name
+}
+
+output "cicd_vm_id" {
+  description = "ID de la VM CI/CD"
+  value       = proxmox_virtual_environment_vm.cicd.vm_id
+}
+
 # ===== TOUTES LES VMs =====
 output "all_vm_names" {
   description = "Noms de toutes les VMs"
@@ -58,7 +69,8 @@ output "all_vm_names" {
     proxmox_virtual_environment_vm.payload_master_3.name,
     proxmox_virtual_environment_vm.payload_worker_1.name,
     proxmox_virtual_environment_vm.payload_worker_2.name,
-    proxmox_virtual_environment_vm.payload_worker_3.name
+    proxmox_virtual_environment_vm.payload_worker_3.name,
+    proxmox_virtual_environment_vm.cicd.name
   ]
 }
 
@@ -73,7 +85,8 @@ output "all_vm_ids" {
     proxmox_virtual_environment_vm.payload_master_3.vm_id,
     proxmox_virtual_environment_vm.payload_worker_1.vm_id,
     proxmox_virtual_environment_vm.payload_worker_2.vm_id,
-    proxmox_virtual_environment_vm.payload_worker_3.vm_id
+    proxmox_virtual_environment_vm.payload_worker_3.vm_id,
+    proxmox_virtual_environment_vm.cicd.vm_id
   ]
 }
 
@@ -83,7 +96,7 @@ output "deployment_summary" {
   value = <<-EOT
 
 ╔════════════════════════════════════════════════════════╗
-║          🚀 DÉPLOIEMENT RÉUSSI - 9 VMs créées          ║
+║         🚀 DÉPLOIEMENT RÉUSSI - 10 VMs créées          ║
 ╚════════════════════════════════════════════════════════╝
 
 📦 RANCHER NODES (Control Plane):
@@ -101,11 +114,14 @@ output "deployment_summary" {
   • payload-worker-2 → ID ${proxmox_virtual_environment_vm.payload_worker_2.vm_id} → ${var.ip_address_base}.${var.ip_start + 7}
   • payload-worker-3 → ID ${proxmox_virtual_environment_vm.payload_worker_3.vm_id} → ${var.ip_address_base}.${var.ip_start + 8}
 
+📦 SERVICES:
+  • cicd → ID ${proxmox_virtual_environment_vm.cicd.vm_id} → ${var.ip_address_base}.${var.ip_start + 9}
+
 📍 Serveur : ${var.proxmox_node}
 💾 Stockage : local-lvm
 🌐 Réseau   : ${var.network_bridge}
 
-✅ Total: 9 VMs déployées avec succès !
+✅ Total: 10 VMs déployées avec succès !
 
 💡 Prochaines étapes:
    1. Démarrer les VMs depuis Proxmox UI

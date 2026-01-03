@@ -1,0 +1,10 @@
+---
+- name: Deploy RKE2 on Payload cluster
+  hosts: k8s_cluster
+  become: true
+  vars_files:
+    - "vars/{{ ENVIRONNEMENT }}/variables.yaml"
+    - "vars/{{ ENVIRONNEMENT }}/secrets.yaml"
+
+  roles:
+    - role: ../ansible-role-rke2

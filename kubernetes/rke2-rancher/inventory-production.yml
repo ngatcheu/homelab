@@ -1,0 +1,17 @@
+---
+all:
+  children:
+    k8s_cluster:
+      vars:
+        ansible_user: root
+      children:
+        masters:
+          vars:
+            rke2_type: "server"
+          hosts:
+            rancher-1:
+              ansible_host: 192.168.1.110
+            rancher-2:
+              ansible_host: 192.168.1.111
+            rancher-3:
+              ansible_host: 192.168.1.112

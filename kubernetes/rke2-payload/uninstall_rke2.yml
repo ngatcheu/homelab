@@ -1,0 +1,57 @@
+---
+- name: Uninstall RKE2 from Payload cluster
+  hosts: k8s_cluster
+  become: true
+
+  tasks:
+    - name: Arrêter le service rke2-server
+      ansible.builtin.service:
+        name: rke2-server
+        state: stopped
+      ignore_errors: true
+      failed_when: false
+
+    - name: Arrêter le service rke2-agent
+      ansible.builtin.service:
+        name: rke2-agent
+        state: stopped
+      ignore_errors: true
+      failed_when: false
+
+    - name: Exécuter le script de désinstallation RKE2
+      ansible.builtin.command:
+        cmd: "/usr/bin/rke2-uninstall.sh"
+      register: uninstall
+      changed_when: uninstall.rc == 0
+      failed_when: false
+
+    - name: Supprimer les fichiers de configuration RKE2
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/rancher/rke2
+        - /var/lib/rancher/rke2
+        - /var/lib/kubelet
+      ignore_errors: true
+
+    - name: Nettoyer les interfaces réseau CNI
+      ansible.builtin.shell:
+        cmd: |
+          ip link delete cni0 2>/dev/null || true
+          ip link delete flannel.1 2>/dev/null || true
+          ip link delete kube-ipvs0 2>/dev/null || true
+      ignore_errors: true
+      failed_when: false
+
+    - name: Supprimer les clés SSH du known_hosts local
+      ansible.builtin.command:
+        cmd: "ssh-keygen -f ~/.ssh/known_hosts -R {{ ansible_host }}"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+      failed_when: false
+
+    - name: Afficher un message de confirmation
+      ansible.builtin.debug:
+        msg: "RKE2 a été désinstallé de {{ inventory_hostname }}"

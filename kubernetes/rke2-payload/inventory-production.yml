@@ -1,0 +1,27 @@
+---
+all:
+  children:
+    k8s_cluster:
+      vars:
+        ansible_user: root
+      children:
+        masters:
+          vars:
+            rke2_type: "server"
+          hosts:
+            payload-1:
+              ansible_host: 192.168.1.113
+            payload-2:
+              ansible_host: 192.168.1.114
+            payload-3:
+              ansible_host: 192.168.1.115
+        workers:
+          vars:
+            rke2_type: "agent"
+          hosts:
+            payload-4:
+              ansible_host: 192.168.1.116
+            payload-5:
+              ansible_host: 192.168.1.117
+            payload-6:
+              ansible_host: 192.168.1.118

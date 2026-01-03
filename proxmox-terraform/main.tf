@@ -1,7 +1,7 @@
 # ========================================
 # Configuration Terraform pour Proxmox
 # Provider: bpg/proxmox
-# 3 VMs Rancher + 6 VMs Payload = 9 VMs
+# 3 VMs Rancher + 6 VMs Payload + 1 VM CI/CD + 1 VM OPNsense = 11 VMs
 # ========================================
 
 # ===== VMs RANCHER (Control Plane) =====
@@ -418,3 +418,52 @@ resource "proxmox_virtual_environment_vm" "payload_worker_3" {
 
   depends_on = [proxmox_virtual_environment_vm.payload_worker_2]
 }
+
+# ===== VM CI/CD =====
+resource "proxmox_virtual_environment_vm" "cicd" {
+  name        = "cicd"
+  node_name   = var.proxmox_node
+  vm_id       = var.vm_id_start + 9
+  description = "CI/CD Server"
+
+  clone {
+    vm_id = 9100
+    full  = true
+  }
+
+  cpu {
+    cores = var.cicd_cpu_cores
+    type  = "host"
+  }
+
+  memory {
+    dedicated = var.cicd_memory
+  }
+
+  network_device {
+    bridge = var.network_bridge
+    model  = "virtio"
+  }
+
+  initialization {
+    ip_config {
+      ipv4 {
+        address = "${var.ip_address_base}.${var.ip_start + 9}/24"
+        gateway = var.gateway
+      }
+    }
+
+    dns {
+      servers = [var.nameserver]
+    }
+
+    user_account {
+      username = "root"
+      keys     = [var.ssh_public_key]
+    }
+  }
+
+  depends_on = [proxmox_virtual_environment_vm.payload_worker_3]
+}
+
+

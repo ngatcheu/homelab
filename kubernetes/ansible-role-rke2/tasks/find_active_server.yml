@@ -1,0 +1,14 @@
+---
+
+- name: Récupérer les faits des services
+  ansible.builtin.service_facts:
+
+- name: Définir la variable Serveur Actif
+  ansible.builtin.set_fact:
+    active_server: "{{ inventory_hostname }}"
+  delegate_facts: true
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups[rke2_cluster_group_name] }}"
+  when:
+    - inventory_hostname in groups[rke2_servers_group_name]
+    - ansible_facts.services["rke2-server.service"].state == "running"

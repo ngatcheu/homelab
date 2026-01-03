@@ -1,0 +1,21 @@
+---
+rke2_version: v1.34.1+rke2r1
+rke2_ha_mode: true
+rke2_ha_mode_keepalived: false
+rke2_api_ip: 192.168.1.113
+rke2_download_kubeconf: true
+rke2_download_kubeconf_path: ./
+rke2_custom_registry_configs:
+ - endpoint: "harbor.devsecops-p-01-app.mondomaine.fr"
+   config:
+    tls:
+     insecure_skip_verify: true
+rke2_server_node_taints: []
+rke2_ingress_default_cert_sacem: ""
+rke2_ingress_default_cert_key_sacem: ""
+
+# Configuration explicite des CIDRs pour éviter les conflits Calico/Canal
+rke2_cluster_cidr:
+  - 10.42.0.0/16
+rke2_service_cidr:
+  - 10.43.0.0/16

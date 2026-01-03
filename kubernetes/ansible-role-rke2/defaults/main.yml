@@ -1,0 +1,374 @@
+---
+# Détermine si les rétrogradations de la version RKE2 sont autorisées.
+# Si défini à `false`, le rôle empêchera les rétrogradations sauf si explicitement permises.
+# Définir à `true` pour autoriser les rétrogradations de la version RKE2.
+# Note : Ce paramètre est ignoré en mode vérification Ansible, et la tâche de prévention associée sera ignorée.
+rke2_allow_downgrade: false
+
+# Le type de nœud - serveur ou agent
+rke2_type: "{{ 'server' if inventory_hostname in groups[rke2_servers_group_name] else 'agent' if inventory_hostname in groups[rke2_agents_group_name] }}"
+
+# Déployer le plan de contrôle en mode HA
+rke2_ha_mode: false
+
+# Installer et configurer Keepalived sur les nœuds Serveur
+# Peut être désactivé si vous utilisez un Load Balancer pré-configuré
+rke2_ha_mode_keepalived: true
+
+# Installer et configurer kube-vip LB et VIP pour le cluster
+# rke2_ha_mode_keepalived doit être false
+rke2_ha_mode_kubevip: false
+
+# Adresse IP de l'API Kubernetes et d'enregistrement RKE2. L'adresse par défaut est l'IPv4 du nœud Serveur/Maître.
+# En mode HA, choisissez une IP statique qui sera définie comme VIP dans keepalived.
+# Ou si keepalived est désactivé, utilisez l'adresse IP de votre LB.
+rke2_api_ip: "{{ hostvars[groups[rke2_servers_group_name].0]['ansible_default_ipv4']['address'] | default(hostvars[groups[rke2_servers_group_name].0]['ansible_default_ipv6']['address'] ) }}"
+
+# option optionnelle pour que le serveur RKE2 écoute sur une adresse IP et un port privés
+# rke2_api_private_ip:
+rke2_api_private_port: 9345
+
+# option optionnelle pour le sous-réseau IP kubevip
+# rke2_api_cidr: 24
+
+# option optionnelle pour kubevip
+# rke2_interface: eth0
+# option optionnelle pour les adresses IPv4/IPv6 à annoncer pour le nœud
+# rke2_bind_address: "{{ hostvars[inventory_hostname]['ansible_' + rke2_interface]['ipv4']['address'] }}"
+
+# Plage d'IP du load balancer kubevip
+rke2_loadbalancer_ip_range: {}
+#  range-global: 192.168.1.50-192.168.1.100
+#  cidr-finance: 192.168.0.220/29,192.168.0.230/29
+
+# Installer le fournisseur cloud kubevip si rke2_ha_mode_kubevip est true
+rke2_kubevip_cloud_provider_enable: true
+
+# Activer kube-vip pour surveiller les Services de type LoadBalancer
+rke2_kubevip_svc_enable: true
+
+# Spécifier quelle image est utilisée pour le conteneur kube-vip
+rke2_kubevip_image: ghcr.io/kube-vip/kube-vip:v0.9.2
+
+# Spécifier quelle image est utilisée pour le conteneur du fournisseur cloud kube-vip
+rke2_kubevip_cloud_provider_image: ghcr.io/kube-vip/kube-vip-cloud-provider:v0.0.12
+
+# Activer le load balancer IPVS kube-vip pour le plan de contrôle
+rke2_kubevip_ipvs_lb_enable: false
+# Activer l'équilibrage de charge de couche 4 pour le plan de contrôle en utilisant le module noyau IPVS
+# Doit utiliser kube-vip version 0.4.0 ou ultérieure
+
+rke2_kubevip_service_election_enable: true
+# Par défaut, le mode ARP fournit une implémentation HA d'une VIP (votre adresse IP de service) qui recevra le trafic sur le leader kube-vip.
+# Pour contourner cela, kube-vip a implémenté une nouvelle fonction qui est "élection de leader par service",
+# au lieu qu'un nœud devienne le leader pour tous les services, une élection est organisée à travers toutes les instances kube-vip et le leader de cette élection devient le détenteur de ce service. En fin de compte,
+# cela signifie que chaque service peut se retrouver sur un nœud différent lorsqu'il est créé, en théorie, empêchant un goulot d'étranglement lors du déploiement initial.
+# version minimale kube-vip 0.5.0
+
+# (Optionnel) Modifier les paramètres pour l'élection de leader - voir le lien des drapeaux d'installation en amont ci-dessous
+# rke2_kubevip_leaseduration: 5
+# rke2_kubevip_renewdeadline: 3
+# rke2_kubevip_retryperiod: 1
+# rke2_kubevip_loglevel: 4
+
+# (Optionnel) Une liste de drapeaux kube-vip
+# Tous les drapeaux peuvent être trouvés ici https://kube-vip.io/docs/installation/flags/
+# rke2_kubevip_args: []
+# - param: lb_enable
+#   value: true
+# - param: lb_port
+#   value: 6443
+
+# Port des métriques Prometheus pour kube-vip
+rke2_kubevip_metrics_port: 2112
+
+# Ajouter des SANs supplémentaires dans le certificat TLS de l'API k8s
+rke2_additional_sans: []
+
+# Configurer le domaine du cluster
+# rke2_cluster_domain: cluster.example.net
+
+# Port de destination du serveur API
+rke2_apiserver_dest_port: 6443
+
+# Taints des nœuds serveur
+rke2_server_node_taints: []
+  # - 'CriticalAddonsOnly=true:NoExecute'
+
+# Taints des nœuds agent
+rke2_agent_node_taints: []
+
+# Jeton secret pré-partagé que les autres nœuds serveur ou agent utiliseront lors de la connexion au cluster
+rke2_token: defaultSecret12345
+
+# Version RKE2
+rke2_version: v1.25.3+rke2r1
+
+# URL vers le dépôt RKE2
+rke2_channel_url: https://update.rke2.io/v1-release/channels
+
+# URL vers le script bash d'installation RKE2
+# par ex. miroir chinois rancher http://rancher-mirror.rancher.cn/rke2/install.sh
+rke2_install_bash_url: https://get.rke2.io
+
+# Répertoire de données local pour RKE2
+rke2_data_path: /var/lib/rancher/rke2
+
+# URL par défaut pour récupérer les artefacts
+rke2_artifact_url: https://github.com/rancher/rke2/releases/download/
+
+# Chemin local pour stocker les artefacts
+rke2_artifact_path: /rke2/artifact
+
+# Artefacts requis pour le mode airgap
+rke2_artifact:
+  - sha256sum-{{ rke2_architecture }}.txt
+  - rke2.linux-{{ rke2_architecture }}.tar.gz
+  - rke2-images.linux-{{ rke2_architecture }}.tar.zst
+
+# Délai d'attente pour récupérer les artefacts en secondes
+rke2_artifact_fetch_timeout: 30
+
+# Modifie la stratégie de déploiement pour installer en se basant sur des artefacts locaux
+rke2_airgap_mode: false
+
+# Type d'implémentation airgap - download, copy ou exists
+# - 'download' récupérera les artefacts sur chaque nœud,
+# - 'copy' transférera les fichiers locaux dans 'rke2_artifact' vers les nœuds,
+# - 'exists' suppose que les fichiers 'rke2_artifact' sont déjà stockés dans 'rke2_artifact_path'
+rke2_airgap_implementation: download
+
+# Chemin source local où les artefacts sont stockés
+rke2_airgap_copy_sourcepath: local_artifacts
+
+# Images tarball pour les composants supplémentaires à copier depuis rke2_airgap_copy_sourcepath vers les nœuds
+# (Les extensions de fichier dans la liste et sur les vrais fichiers doivent être conservées)
+rke2_airgap_copy_additional_tarballs: []
+
+# Destination pour les tarballs d'images supplémentaires airgap ( voir https://docs.rke2.io/install/airgap#tarball-method )
+rke2_tarball_images_path: "{{ rke2_data_path }}/agent/images"
+
+# Architecture à télécharger, actuellement il y a des versions pour amd64 et s390x
+rke2_architecture: amd64
+
+# Répertoire de destination pour le script d'installation RKE2
+rke2_install_script_dir: /var/tmp
+
+# Canal RKE2
+rke2_channel: stable
+
+# Ne pas déployer les composants packagés et supprimer tous les composants déployés
+# Éléments valides : rke2-canal, rke2-coredns, rke2-ingress-nginx, rke2-metrics-server
+rke2_disable: []
+
+# Option pour désactiver kube-proxy
+disable_kube_proxy: false
+
+# Option pour désactiver le contrôleur cloud intégré lors du travail avec aws, azure, gce etc
+# Pour un environnement on-prem, cela devrait rester false et garder rke2_cloud_provider_name comme "external"
+# https://docs.k3s.io/networking/networking-services#deploying-an-external-cloud-controller-manager (pareil pour RKE2)
+rke2_disable_cloud_controller: false
+
+# Fournisseur cloud à utiliser pour le cluster (aws, azure, gce, openstack, vsphere, external)
+# applicable uniquement si rke2_disable_cloud_controller est true
+rke2_cloud_provider_name: "external"
+
+# Chemin vers les manifestes personnalisés déployés pendant l'installation RKE2
+# Il est possible d'utiliser le templating Jinja2 dans les manifestes
+rke2_custom_manifests: []
+
+# Chemin vers les pods statiques déployés pendant l'installation RKE2
+rke2_static_pods: []
+
+# Configurer un registre Containerd personnalisé
+rke2_custom_registry_mirrors: []
+  # - name:
+  #   endpoint: {}
+#   rewrite: '"^rancher/(.*)": "mirrorproject/rancher-images/$1"'
+
+# Configurer une configuration supplémentaire du registre Containerd personnalisé
+rke2_custom_registry_configs: []
+#   - endpoint:
+#     config:
+
+# Chemin vers le template du fichier de configuration du registre de conteneurs
+rke2_custom_registry_path: templates/registries.yaml.j2
+
+# Chemin vers le template du fichier de configuration RKE2
+rke2_config: templates/config.yaml.j2
+
+# Répertoire source du snapshot etcd
+rke2_etcd_snapshot_source_dir: etcd_snapshots
+
+# Nom du fichier de snapshot etcd.
+# Lorsque le nom de fichier est défini, etcd sera restauré lors de l'exécution initiale du déploiement Ansible.
+# etcd sera restauré uniquement pendant l'exécution initiale, donc même si vous laissez le nom de fichier spécifié,
+# etcd restera intact lors des prochaines exécutions.
+# Vous pouvez soit utiliser ceci ou définir les options dans `rke2_etcd_snapshot_s3_options`
+rke2_etcd_snapshot_file: ""
+
+# Emplacement du snapshot etcd
+rke2_etcd_snapshot_destination_dir: "{{ rke2_data_path }}/server/db/snapshots"
+
+# (Optionnel) Planification du snapshot etcd
+# La planification est au format cron, par ex. "0 */12 * * *"
+# rke2_etcd_snapshot_schedule: "0 */12 * * *"
+
+# Options s3 du snapshot etcd
+# Définir soit toutes ces valeurs ou `rke2_etcd_snapshot_file` et `rke2_etcd_snapshot_source_dir`
+
+# rke2_etcd_snapshot_s3_options:
+  # https://docs.rke2.io/datastore/backup_restore?_highlight=restore&_highlight=sna&etcdsnap=Multiple+Servers#s3-compatible-object-store-support
+  # s3_endpoint: "" # requis
+  # access_key: "" # requis
+  # secret_key: "" # requis
+  # bucket: "" # requis
+  # snapshot_name: "" # optionnel - si spécifié, etcd sera restauré lors de la première initialisation, c'est-à-dire lors du démarrage à partir de zéro
+  # skip_ssl_verify: false # optionnel
+  # endpoint_ca: "" # optionnel
+  # region: "" # optionnel - par défaut us-east-1
+  # folder: "" # optionnel - par défaut au niveau supérieur du bucket
+  # proxy: "" # optionnel - Serveur proxy à utiliser lors de la connexion à S3, remplaçant toutes les variables d'environnement liées au proxy
+  # insecure: false # optionnel - Désactive S3 sur HTTPS
+  # timeout: "" # optionnel - Délai d'attente S3 (par défaut : 5m0s)
+  # s3_retention: 5 # optionnel - Nombre de snapshots dans S3 à conserver (par défaut : 5)
+# Remplacer le snapshotter containerd par défaut
+rke2_snapshotter: "{{ rke2_snapshooter }}"
+rke2_snapshooter: overlayfs # variable héritée qui existe uniquement pour maintenir la rétrocompatibilité avec les configurations précédentes
+
+# Déployer RKE2 avec le CNI par défaut canal
+rke2_cni: calico
+
+# Valider la configuration du système par rapport au benchmark sélectionné
+# (La valeur prise en charge est "cis-1.23" ou éventuellement "cis-1.6" si vous exécutez RKE2 avant la 1.25 ou "cis" pour rke2 1.30+)
+rke2_cis_profile: ""
+
+# Télécharger le fichier de configuration Kubernetes vers le contrôleur Ansible
+rke2_download_kubeconf: false
+
+# Nom du fichier de configuration Kubernetes qui sera téléchargé vers le contrôleur Ansible
+rke2_download_kubeconf_file_name: rke2.yaml
+
+# Répertoire de destination où le fichier de configuration Kubernetes sera téléchargé vers le contrôleur Ansible
+rke2_download_kubeconf_path: /tmp
+
+# Nom du groupe d'inventaire Ansible par défaut pour le cluster RKE2
+rke2_cluster_group_name: k8s_cluster
+
+# Nom du groupe d'inventaire Ansible par défaut pour les serveurs RKE2
+rke2_servers_group_name: masters
+
+# Nom du groupe d'inventaire Ansible par défaut pour les agents RKE2
+rke2_agents_group_name: workers
+
+# (Optionnel) Une liste de drapeaux du serveur API Kubernetes
+# Tous les drapeaux peuvent être trouvés ici https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver
+# rke2_kube_apiserver_args: []
+
+# (Optionnel) Liste des étiquettes de nœud
+# k8s_node_label: []
+
+# (Optionnel) Options de configuration RKE2 serveur supplémentaires
+# Vous pouvez trouver les drapeaux sur https://docs.rke2.io/reference/server_config
+# rke2_server_options:
+#   - "option: value"
+#   - "node-ip: {{ rke2_bind_address }}"  # ex: (agent/networking) adresses IPv4/IPv6 à annoncer pour le nœud
+
+# (Optionnel) Options de configuration RKE2 agent supplémentaires
+# Vous pouvez trouver les drapeaux sur https://docs.rke2.io/reference/linux_agent_config
+# rke2_agent_options:
+#   - "option: value"
+#   - "node-ip: {{ rke2_bind_address }}"  # ex: (agent/networking) adresses IPv4/IPv6 à annoncer pour le nœud
+
+# (Optionnel) Configurer le Proxy
+# Tous les drapeaux peuvent être trouvés ici https://docs.rke2.io/advanced#configuring-an-http-proxy
+# rke2_environment_options: []
+#   - "option=value"
+#   - "HTTP_PROXY=http://your-proxy.example.com:8888"
+
+# (Optionnel) Personnaliser les arguments par défaut de kube-controller-manager
+# Cette fonctionnalité permet d'ajouter l'argument s'il n'est pas présent par défaut ou de le remplacer s'il existe déjà.
+# rke2_kube_controller_manager_arg:
+#   - "bind-address=0.0.0.0"
+
+# (Optionnel) Personnaliser les arguments par défaut de kube-scheduler
+# Cette fonctionnalité permet d'ajouter l'argument s'il n'est pas présent par défaut ou de le remplacer s'il existe déjà.
+# rke2_kube_scheduler_arg:
+#   - "bind-address=0.0.0.0"
+
+# Configurer le contrôleur Ingress (valeurs autorisées : ingress-nginx, traefik, istio, none)
+rke2_ingress_controller: ingress-nginx
+
+# (Optionnel) Configurer nginx via HelmChartConfig: https://docs.rke2.io/networking/networking_services#nginx-ingress-controller
+# rke2_ingress_nginx_values:
+#   controller:
+#     config:
+#       use-forwarded-headers: "true"
+rke2_ingress_nginx_values: {}
+
+# (Optionnel) Configurer Traefik via HelmChartConfig
+# rke2_traefik_values:
+#   ports:
+#     web:
+#       exposedPort: 80
+rke2_traefik_values: {}
+
+# (Optionnel) Configurer Istio via HelmChartConfig
+# rke2_istio_values:
+#   pilot:
+#     resources:
+#       requests:
+#         cpu: 100m
+#         memory: 128Mi
+rke2_istio_values: {}
+
+# Condamner, drainer le nœud qui est en cours de mise à niveau. Lever la condamnation du nœud une fois RKE2 mis à niveau
+rke2_drain_node_during_upgrade: false
+# Arguments supplémentaires qui seront passés à la commande kubectl drain, par ex. --pod-selector
+rke2_drain_additional_args: ""
+
+# Attendre que tous les pods aient un statut en cours d'exécution ou réussi après le redémarrage du service rke2 pendant le redémarrage progressif.
+rke2_wait_for_all_pods_to_be_ready: false
+# Attendre que tous les pods soient prêts après le redémarrage du service rke2 pendant le redémarrage progressif.
+# Nommé "healthy" pour maintenir la rétrocompatibilité avec les noms de variables existants.
+rke2_wait_for_all_pods_to_be_healthy: false
+# Les arguments passés à la commande kubectl wait
+rke2_wait_for_all_pods_to_be_healthy_args: --for=condition=Ready -A --all pod --field-selector=metadata.namespace!=kube-system,status.phase!=Succeeded
+
+# Activer le mode debug (rke2-service)
+rke2_debug: false
+
+# (Optionnel) Personnaliser la configuration kubelet en utilisant KubeletConfiguration - https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/
+# rke2_kubelet_config:
+#   imageGCHighThresholdPercent: 80
+#   imageGCLowThresholdPercent: 70
+# Notez que vous devez également ajouter ce qui suit aux arguments kubelet :
+# rke2_kubelet_arg:
+#   - "--config=/etc/rancher/rke2/kubelet-config.yaml"
+rke2_kubelet_config: {}
+
+# (Optionnel) Personnaliser les arguments kubelet par défaut
+# rke2_kubelet_arg:
+#   - "--system-reserved=cpu=100m,memory=100Mi"
+
+# (Optionnel) Personnaliser les arguments kube-proxy par défaut
+# rke2_kube_proxy_arg:
+#   - "proxy-mode=ipvs"
+
+# (Optionnel) Personnaliser les montages supplémentaires kube-proxy par défaut
+# rke2_kube_proxy_extra_mount:
+#   - "/lib/modules:/lib/modules:ro"
+
+# La valeur pour l'élément de configuration node-name
+rke2_node_name: "{{ inventory_hostname }}"
+
+# plage réseau de pods par défaut pour rke2
+rke2_cluster_cidr:
+  - 10.42.0.0/16
+
+# plage réseau de services par défaut pour rke2
+rke2_service_cidr:
+  - 10.43.0.0/16
+
+# Activer SELinux pour rke2
+rke2_selinux: false

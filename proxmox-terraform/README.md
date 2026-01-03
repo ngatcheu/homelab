@@ -1,9 +1,22 @@
 # Déploiement Kubernetes sur Proxmox avec Terraform
 
-Infrastructure as Code pour déployer un cluster Kubernetes sur Proxmox VE avec 9 VMs :
+Infrastructure as Code pour déployer un cluster Kubernetes sur Proxmox VE avec 10 VMs :
 - 3 VMs Rancher (Control Plane)
 - 3 VMs Payload Masters
 - 3 VMs Payload Workers
+- 1 VM CI/CD
+
+## Démarrage rapide
+
+**Nouveau ?** Suivez le guide complet : [PHASE1-DEPLOYMENT.md](PHASE1-DEPLOYMENT.md)
+
+**Guide pas à pas Phase 1** :
+1. Vérifier prérequis → [check-proxmox-prereqs.sh](check-proxmox-prereqs.sh)
+2. Créer template Rocky 9 → [create-rocky9-template.sh](create-rocky9-template.sh)
+3. Créer bridges réseau → [create-network-bridges.sh](create-network-bridges.sh)
+4. Déployer avec Terraform → `terraform apply`
+
+**Voir aussi** : [ROADMAP-DEVSECOPS.md](../ROADMAP-DEVSECOPS.md) pour la vue d'ensemble complète
 
 ## Architecture
 
@@ -13,19 +26,22 @@ Infrastructure as Code pour déployer un cluster Kubernetes sur Proxmox VE avec 
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
 │  🎯 RANCHER (Control Plane)                                  │
-│  ├─ rancher-1      → 102 → 192.168.1.110 → 2C/8GB           │
-│  ├─ rancher-2      → 103 → 192.168.1.111 → 2C/8GB           │
-│  └─ rancher-3      → 104 → 192.168.1.112 → 2C/8GB           │
+│  ├─ rancher-1      → 110 → 192.168.1.110 → 2C/8GB           │
+│  ├─ rancher-2      → 111 → 192.168.1.111 → 2C/8GB           │
+│  └─ rancher-3      → 112 → 192.168.1.112 → 2C/8GB           │
 │                                                               │
 │  🔧 PAYLOAD MASTERS                                          │
-│  ├─ payload-master-1 → 105 → 192.168.1.113 → 2C/4GB         │
-│  ├─ payload-master-2 → 106 → 192.168.1.114 → 2C/4GB         │
-│  └─ payload-master-3 → 107 → 192.168.1.115 → 2C/4GB         │
+│  ├─ payload-master-1 → 113 → 192.168.1.113 → 2C/4GB         │
+│  ├─ payload-master-2 → 114 → 192.168.1.114 → 2C/4GB         │
+│  └─ payload-master-3 → 115 → 192.168.1.115 → 2C/4GB         │
 │                                                               │
 │  ⚙️  PAYLOAD WORKERS                                         │
-│  ├─ payload-worker-1 → 108 → 192.168.1.116 → 3C/8GB         │
-│  ├─ payload-worker-2 → 109 → 192.168.1.117 → 3C/8GB         │
-│  └─ payload-worker-3 → 110 → 192.168.1.118 → 3C/8GB         │
+│  ├─ payload-worker-1 → 116 → 192.168.1.116 → 3C/8GB         │
+│  ├─ payload-worker-2 → 117 → 192.168.1.117 → 3C/8GB         │
+│  └─ payload-worker-3 → 118 → 192.168.1.118 → 3C/8GB         │
+│                                                               │
+│  📦 SERVICES                                                 │
+│  └─ cicd           → 119 → 192.168.1.119 → 2C/8GB           │
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -140,6 +156,10 @@ payload_master_memory    = 4096
 # Payload Workers
 payload_worker_cpu_cores = 3
 payload_worker_memory    = 8192
+
+# CI/CD
+cicd_cpu_cores = 2
+cicd_memory    = 8192
 ```
 
 #### Configuration Réseau
@@ -175,11 +195,14 @@ Outputs disponibles :
 
 ### Démarrer les VMs
 
-Les VMs sont créées mais non démarrées. Pour les démarrer :
+Les VMs Kubernetes et CI/CD sont créées mais non démarrées. Pour les démarrer :
 
 ```bash
-# Depuis le serveur Proxmox
-for i in {102..110}; do qm start $i; done
+# Depuis le serveur Proxmox - VMs Kubernetes + CI/CD
+for i in {102..111}; do qm start $i; done
+
+# OPNsense (VM 200) - Démarrer manuellement après installation
+qm start 200
 ```
 
 ### Se connecter aux VMs
@@ -218,11 +241,148 @@ bash cleanup-vms.sh
 
 Utilisez ce script si vous obtenez l'erreur "config file already exists".
 
+## Configuration OPNsense Firewall
+
+### Vue d'ensemble
+
+La VM OPNsense fonctionne comme un **firewall interne** avec 3 interfaces réseau pour segmenter votre infrastructure :
+
+- **VM ID** : 200
+- **CPU** : 2 cores
+- **RAM** : 2 GB
+- **Disque** : 20 GB
+- **Boot** : ISO OPNsense-25.7-dvd-amd64.iso
+
+### Architecture Réseau
+
+**IMPORTANT : OPNsense est un firewall INTERNE, pas votre routeur principal !**
+
+```
+Internet → Box (192.168.1.1) → vmbr0 (192.168.1.0/24)
+                                   ↓                  ↓
+                              VMs existantes    OPNsense (192.168.1.200)
+                           (Rancher, Payload)           ↓
+                             continuent avec        ┌───┴───┐
+                             box comme gateway      ↓       ↓
+                                              vmbr1 (LAN) vmbr2 (OPT1)
+                                           192.168.10.0/24 192.168.20.0/24
+                                            Management    Production
+
+Interfaces OPNsense:
+  • vtnet0 (LAN)      → vmbr1 → 192.168.10.1/24  (Gateway Management)
+  • vtnet1 (OPT1)     → vmbr2 → 192.168.20.1/24  (Gateway Production)
+  • vtnet2 (OPT2)     → vmbr0 → 192.168.1.200/24 (Uplink Internet)
+```
+
+### Installation OPNsense
+
+**1. Démarrer la VM depuis Proxmox UI**
+
+La VM est créée en mode `started = false`. Démarrez-la manuellement depuis l'interface Proxmox.
+
+**2. Installation depuis le DVD**
+
+```bash
+# Login installateur
+login: installer
+password: opnsense
+
+# Suivre l'assistant d'installation
+# - Keymap : fr.kbd (ou us)
+# - Install : Option 2 - Install (UFS)
+# - Disk : da0
+# - Root password : [votre mot de passe sécurisé]
+# - Complete Install → Reboot
+```
+
+**3. Assignment des interfaces (Premier boot)**
+
+**IMPORTANT : OPNsense n'a PAS d'interface WAN dans cette configuration !**
+
+```
+Valid interfaces are:
+vtnet0   BC:24:11:00:01:01  (vmbr1 - Management)
+vtnet1   BC:24:11:00:01:02  (vmbr2 - Production)
+vtnet2   BC:24:11:00:01:00  (vmbr0 - Uplink Internet)
+
+Do you want to configure VLANs now? [y/n]: n
+
+Enter the WAN interface name: [laissez VIDE - Appuyez sur Entrée]
+Enter the LAN interface name: vtnet0
+Enter the Optional 1 interface name: vtnet1
+Enter the Optional 2 interface name: vtnet2
+```
+
+**Pourquoi pas de WAN ?** OPNsense est un firewall interne. L'accès Internet passe par vtnet2 (OPT2) qui se connecte à vmbr0 où votre box (192.168.1.1) reste le routeur principal.
+
+**4. Configuration des interfaces (Console OPNsense)**
+
+Menu principal → Option 2: Set interface IP address
+
+**Interface LAN (vtnet0 - vmbr1) :**
+```
+IPv4 address: 192.168.10.1
+Subnet: 24
+DHCP server: y
+DHCP range: 192.168.10.100 - 192.168.10.200
+```
+
+**Interface OPT1 (vtnet1 - vmbr2) :**
+```
+IPv4 address: 192.168.20.1
+Subnet: 24
+DHCP server: y
+DHCP range: 192.168.20.100 - 192.168.20.200
+```
+
+**Interface OPT2 (vtnet2 - vmbr0 Uplink) :**
+```
+IPv4 address: 192.168.1.200
+Subnet: 24
+DHCP server: n (PAS de DHCP sur l'uplink !)
+```
+
+**5. Configuration Web UI**
+
+Accès : https://192.168.10.1 (depuis une VM sur vmbr1)
+
+```
+Login: root
+Password: [votre mot de passe]
+```
+
+**Configuration Gateway :**
+- System → Gateways → Single
+- Ajouter : BOX_GW → Interface OPT2 → IP 192.168.1.1
+- Marquer comme default gateway
+
+**Règles Firewall :**
+- Firewall → Rules → LAN : Allow LAN to any
+- Firewall → Rules → OPT1 : Allow OPT1 to any
+- Firewall → NAT → Outbound : Mode Automatic
+
+### Résumé des Interfaces
+
+| Interface | Bridge | IP OPNsense | Réseau | DHCP Range | Rôle | Config OPNsense |
+|-----------|--------|-------------|---------|------------|------|-----------------|
+| vtnet0 | vmbr1 | 192.168.10.1/24 | Management | .100-.200 | Gateway interne | **LAN** |
+| vtnet1 | vmbr2 | 192.168.20.1/24 | Production | .100-.200 | Gateway interne | **OPT1** |
+| vtnet2 | vmbr0 | 192.168.1.200/24 | Internet | Aucun | Uplink Internet | **OPT2** |
+
+### Points Importants
+
+- OPNsense n'est **PAS** la gateway principale de votre réseau
+- Vos VMs existantes sur vmbr0 (Rancher, Payload) continuent d'utiliser votre box comme gateway
+- Seules les nouvelles VMs sur vmbr1 (Management) ou vmbr2 (Production) utiliseront OPNsense
+- Pas de conflit DHCP car OPNsense ne fait pas de DHCP sur vmbr0
+
 ## Prochaines étapes
 
 Une fois les VMs déployées et démarrées :
 
-1. **Installer RKE2 sur les nodes Rancher**
+1. **Installer et configurer OPNsense** (voir section ci-dessus)
+
+2. **Installer RKE2 sur les nodes Rancher**
    ```bash
    # Se connecter au premier node Rancher
    ssh root@192.168.1.110
@@ -233,13 +393,19 @@ Une fois les VMs déployées et démarrées :
    systemctl start rke2-server.service
    ```
 
-2. **Joindre les autres nodes Rancher au cluster**
+3. **Joindre les autres nodes Rancher au cluster**
 
-3. **Configurer les Payload nodes**
+4. **Configurer les Payload nodes**
    - Installer RKE2 en mode agent
    - Joindre au cluster Rancher
 
-4. **Déployer vos applications**
+5. **Configurer DNS et Certificats**
+   - Installer cert-manager pour certificats automatiques
+   - Déployer Pi-hole pour DNS interne
+   - Configurer CoreDNS pour résolution .local
+   - Voir détails complets dans [ROADMAP-DEVSECOPS.md](ROADMAP-DEVSECOPS.md) (Jour 8)
+
+6. **Déployer vos applications**
 
 ## Structure du projet
 
@@ -266,9 +432,16 @@ Le template Rocky Linux 9 n'existe pas dans Proxmox.
 
 ### Erreur : "config file already exists"
 
-Des VMs avec les IDs 102-110 existent déjà dans Proxmox.
+Des VMs avec les IDs 102-111 ou 200 existent déjà dans Proxmox.
 
-**Solution** : Exécutez [cleanup-vms.sh](cleanup-vms.sh) sur votre serveur Proxmox pour les supprimer.
+**Solution** :
+```bash
+# Supprimer les VMs Kubernetes/CI/CD (102-111)
+for i in {102..111}; do qm destroy $i; done
+
+# Supprimer OPNsense (200)
+qm destroy 200
+```
 
 ### Erreur : "permission denied"
 

@@ -1,0 +1,10 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-istio
+  namespace: istio-system
+spec:
+  valuesContent: |-
+{% if rke2_istio_values | length > 0 %}
+    {{ rke2_istio_values | to_nice_yaml(indent=2) | indent(4) }}
+{% endif %}

@@ -1,0 +1,10 @@
+---
+- name: Deploy RKE2 on Rancher masters
+  hosts: masters
+  become: true
+  vars_files:
+    - "vars/{{ ENVIRONNEMENT }}/variables.yaml"
+    - "vars/{{ ENVIRONNEMENT }}/secrets.yaml"
+
+  roles:
+    - role: ../ansible-role-rke2

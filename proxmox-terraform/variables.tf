@@ -19,7 +19,7 @@ variable "proxmox_password" {
 variable "vm_id_start" {
   description = "ID de départ pour les VMs dans Proxmox"
   type        = number
-  default     = 100
+  default     = 110
 }
 
 variable "template_name" {
@@ -140,3 +140,17 @@ variable "iso_file" {
   type        = string
   default     = ""
 }
+
+# === Configuration CI/CD ===
+variable "cicd_cpu_cores" {
+  description = "Nombre de cœurs CPU pour la VM CI/CD"
+  type        = number
+  default     = 2
+}
+
+variable "cicd_memory" {
+  description = "Mémoire RAM en MB pour la VM CI/CD"
+  type        = number
+  default     = 8192
+}
+

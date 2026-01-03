@@ -1,0 +1,18 @@
+---
+
+- name: Arrêter et désactiver le service firewalld
+  ansible.builtin.service:
+    name: firewalld
+    state: stopped
+    enabled: false
+  ignore_errors: true
+  failed_when: false
+
+- name: Démarrer et activer le service nftables
+  ansible.builtin.service:
+    name: nftables
+    state: started
+    enabled: true
+  ignore_errors: true
+  failed_when: false
+

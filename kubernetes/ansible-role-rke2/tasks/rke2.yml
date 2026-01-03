@@ -1,0 +1,305 @@
+---
+- name: Télécharger le script d'installation RKE2
+  ansible.builtin.get_url:
+    url: "{{ rke2_install_bash_url }}"
+    dest: "{{ rke2_install_script_dir }}/rke2.sh"
+    mode: 0700
+    timeout: "{{ rke2_artifact_fetch_timeout }}"
+  when: not rke2_airgap_mode
+
+- name: Copier le script d'installation RKE2 local
+  ansible.builtin.copy:
+    src: "{{ rke2_airgap_copy_sourcepath }}/rke2.sh"
+    dest: "{{ rke2_install_script_dir }}/rke2.sh"
+    mode: 0700
+    force: yes
+  when:
+    - rke2_airgap_mode
+    - rke2_airgap_implementation == 'copy'
+
+- name: Créer le dossier des artefacts RKE2
+  ansible.builtin.file:
+    path: "{{ rke2_artifact_path }}"
+    state: directory
+    mode: 0700
+  when:
+    - rke2_airgap_mode
+    - rke2_airgap_implementation != 'exists'
+
+- name: Télécharger les checksums et artefacts RKE2 (tentative de téléchargement distant d'abord - repli sur téléchargement local et envoi)
+  when:
+    - rke2_airgap_mode
+    - rke2_airgap_implementation == 'download'
+  block:
+    - name: Télécharger le fichier de checksum sha256 (mode airgap)
+      ansible.builtin.get_url:
+        url: "{{ rke2_artifact_url }}/{{ rke2_version }}/sha256sum-{{ rke2_architecture }}.txt"
+        dest: "{{ rke2_artifact_path }}/sha256sum-{{ rke2_architecture }}.txt"
+        force: yes
+        mode: 0640
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+    - name: Télécharger les artefacts RKE2 et comparer avec les checksums (mode airgap)
+      ansible.builtin.get_url:
+        url: "{{ rke2_artifact_url }}/{{ rke2_version }}/{{ item }}"
+        dest: "{{ rke2_artifact_path }}/{{ item }}"
+        mode: 0640
+        checksum: "sha256:{{ rke2_artifact_url }}/{{ rke2_version }}/sha256sum-{{ rke2_architecture }}.txt"
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+      with_items: "{{ rke2_artifact | reject('search', 'sha256sum') | list }}"
+    - name: Télécharger le script d'installation RKE2 (mode airgap)
+      ansible.builtin.get_url:
+        url: "{{ rke2_install_bash_url }}"
+        dest: "{{ rke2_install_script_dir }}/rke2.sh"
+        mode: 0700
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+  rescue:
+    - name: "Échec du téléchargement distant : téléchargement local et envoi vers les hôtes distants (mode airgap - téléchargement local et envoi vers distant)"
+      ansible.builtin.pause: # Léger délai pour s'assurer que vous savez que cela va se produire et que vous avez le temps d'annuler
+        seconds: 7
+    - name: "Créer le répertoire {{ rke2_airgap_copy_sourcepath }}"
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "{{ rke2_airgap_copy_sourcepath }}"
+        state: directory
+        mode: 0750
+        owner: "{{ lookup('env', 'USER') }}"
+    - name: Télécharger le checksum RKE2 localement
+      delegate_to: localhost
+      run_once: true
+      register: checksum_file
+      ansible.builtin.get_url:
+        url: "{{ rke2_artifact_url }}/{{ rke2_version }}/sha256sum-{{ rke2_architecture }}.txt"
+        dest: "{{ rke2_airgap_copy_sourcepath }}/"
+        force: yes
+        mode: 0640
+        owner: "{{ lookup('env', 'USER') }}"
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+    - name: Téléchargement des artefacts RKE2 localement
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.get_url:
+        force: yes
+        url: "{{ item }}"
+        dest: "{{ rke2_airgap_copy_sourcepath }}/"
+        mode: 0640
+        owner: "{{ lookup('env', 'USER') }}"
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+      with_items: "{{ [rke2_artifact_url + '/' + rke2_version + '/'] | product(rke2_artifact) | map('join') | list + [rke2_install_bash_url] }}"
+    - name: Télécharger le script d'installation RKE2 localement
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.get_url:
+        url: "{{ rke2_install_bash_url }}"
+        dest: "{{ rke2_airgap_copy_sourcepath }}/rke2.sh"
+        mode: 0700
+        owner: "{{ lookup('env', 'USER') }}"
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+    - name: Copier les fichiers RKE2 locaux vers les hôtes distants
+      ansible.builtin.copy:
+        src: "{{ rke2_airgap_copy_sourcepath }}/"
+        dest: "{{ rke2_artifact_path }}/"
+        mode: 0640
+    - name: Copier le script d'installation RKE2 local vers les hôtes distants
+      ansible.builtin.copy:
+        src: "{{ rke2_airgap_copy_sourcepath }}/rke2.sh"
+        dest: "{{ rke2_install_script_dir }}/rke2.sh"
+        mode: 0700
+
+- name: Copier les artefacts RKE2 locaux
+  ansible.builtin.copy:
+    src: "{{ rke2_airgap_copy_sourcepath }}/{{ item }}"
+    dest: "{{ rke2_artifact_path }}/{{ item }}"
+    mode: 0640
+    force: yes
+  with_items: "{{ rke2_artifact }}"
+  when:
+    - rke2_airgap_mode
+    - rke2_airgap_implementation == 'copy'
+
+- name: Mode airgap - tarballs d'images supplémentaires
+  when:
+    - rke2_airgap_mode
+    - ( rke2_airgap_copy_additional_tarballs | length > 0 )
+    - rke2_airgap_implementation != 'exists'
+  block:
+    - name: Créer le dossier des tarballs d'images supplémentaires
+      ansible.builtin.file:
+        path: "{{ rke2_tarball_images_path }}"
+        state: directory
+        mode: 0700
+    - name: Copier les images tarball supplémentaires des composants RKE2
+      ansible.builtin.copy:
+        src: "{{ rke2_airgap_copy_sourcepath }}/{{ item }}"
+        dest: "{{ rke2_tarball_images_path }}/{{ item }}"
+        mode: 0644
+        force: yes
+      with_items: "{{ rke2_airgap_copy_additional_tarballs }}"
+
+- name: Mode airgap - s'assurer que les artefacts existent et ont des permissions acceptables # modifie uniquement les permissions si elles sont trop permissives
+  when:
+    - rke2_airgap_mode
+    - rke2_airgap_implementation == 'exists'
+  block:
+    - name: Enregistrer les artefacts
+      ansible.builtin.stat:
+        path: "{{ rke2_artifact_path }}/{{ item }}"
+      with_items: "{{ rke2_artifact }}"
+      register: artifacts
+    - name: Enregistrer le script d'installation
+      ansible.builtin.stat:
+        path: "{{ rke2_install_script_dir }}/rke2.sh"
+      register: install_script
+    - name: Enregistrer les faits des artefacts
+      ansible.builtin.set_fact:
+        artifacts_writeable: "{{ artifacts.values() | map(attribute='writeable') | list | bool }}"
+    - name: Rendre les artefacts en lecture seule
+      ansible.builtin.file:
+        path: "{{ rke2_artifact_path }}/{{ item }}"
+        mode: 0640
+      with_items: "{{ rke2_artifact }}"
+      when: artifacts_writeable
+    - name: Rendre le script d'installation exécutable
+      ansible.builtin.file:
+        path: "{{ rke2_install_script_dir }}/rke2.sh"
+        mode: 0700
+      when:
+        - install_script.stat.writeable
+        - not install_script.stat.executable
+    - name: Le script d'installation doit être exécutable
+      ansible.builtin.fail:
+        msg: "Le script d'installation dans {{ rke2_install_script_dir }}/rke2.sh doit être exécutable."
+      when: not install_script.stat.executable
+
+- name: Récupérer les faits des services
+  ansible.builtin.service_facts:
+
+- name: Obtenir les statistiques de l'objet du système de fichiers
+  ansible.builtin.stat:
+    path: /usr/local
+  register: usr_local
+
+- name: Vérifier si partition séparée
+  ansible.builtin.command: grep '/usr/local ' /proc/mounts
+  changed_when: false
+  register: partition_result
+  failed_when: partition_result.rc >= 2
+  check_mode: false
+
+- name: Définir le chemin binaire RKE2
+  ansible.builtin.set_fact:
+    rke2_bin_path: "{{ '/usr/local/bin/rke2' if (not usr_local.stat.writeable) or (partition_result.rc == 1) else '/opt/rke2/bin/rke2' }}"
+
+- name: Vérifier la version RKE2
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    rke2_bin_path="{{ rke2_bin_path }}"
+    rke2_service_name="{{ rke2_service_name }}"
+    rke2_version="{{ rke2_version }}"
+
+    if [ -f "$rke2_bin_path" ]; then
+      installed_version="$($rke2_bin_path --version | awk '/rke2 version/ {print $3}')"
+    else
+      installed_version="not installed"
+    fi
+
+    if systemctl is-active --quiet $rke2_service_name && rke2_service_pid=$(systemctl show $rke2_service_name --property MainPID --value); then
+      rke2_bin_path="$(realpath "/proc/$rke2_service_pid/exe")"
+    fi
+
+    # Linux appends the target of removed proc exe with ' (deleted)', making the path unavailable.
+    if [ -f "$rke2_bin_path" ]; then
+      running_version="$($rke2_bin_path --version | awk '/rke2 version/ {print $3}')"
+    elif [ "$installed_version" = "not installed" ]; then
+      running_version="$rke2_version"
+    else
+      running_version="outdated"
+    fi
+
+    echo "{\"installed_version\":\"$installed_version\",\"running_version\":\"$running_version\"}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: versions_check
+
+- name: Définir les versions RKE2
+  when: not ansible_check_mode
+  ansible.builtin.set_fact:
+    installed_version: "{{ versions.installed_version }}"
+    running_version: "{{ versions.running_version }}"
+  vars:
+    versions: "{{ versions_check.stdout | from_json }}"
+
+- name: Empêcher la rétrogradation accidentelle de RKE2
+  when: not ansible_check_mode and installed_version != "not installed" and not rke2_allow_downgrade
+  ansible.builtin.assert:
+    that:
+      - >
+        (rke2_version_clean is version(running_version_clean, '>=')) or
+        (rke2_version_clean is version(running_version_clean, '<') and rke2_allow_downgrade)
+    fail_msg: >
+      La rétrogradation de version n'est pas autorisée sauf si explicitement permise.
+      Version en cours d'exécution actuelle : {{ running_version_clean }},
+      version souhaitée : {{ rke2_version_clean }}.
+      Définissez 'rke2_allow_downgrade: true' pour autoriser les rétrogradations.
+    success_msg: >
+      Vérification de version réussie. Version en cours d'exécution actuelle : {{ running_version_clean }},
+      version souhaitée : {{ rke2_version_clean }}."
+  vars:
+    rke2_version_clean: "{{ rke2_version | regex_search('v([0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') }}"
+    running_version_clean: "{{ running_version | regex_search('v([0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') }}"
+
+- name: Exécuter le script d'installation RKE2
+  when: not ansible_check_mode and rke2_version != installed_version
+  block:
+    - name: Exécuter le script d'installation RKE2 avec les variables airgap
+      ansible.builtin.command:
+        cmd: "{{ rke2_install_script_dir }}/rke2.sh"
+      environment:
+        INSTALL_RKE2_ARTIFACT_PATH: "{{ rke2_artifact_path }}"
+        INSTALL_RKE2_AGENT_IMAGES_DIR: "{{ rke2_data_path }}/agent/images"
+        INSTALL_RKE2_METHOD: "{{ rke2_method }}"
+      changed_when: false
+      when: rke2_airgap_mode
+    - name: Exécuter le script d'installation RKE2 sans les variables airgap
+      ansible.builtin.command:
+        cmd: "{{ rke2_install_script_dir }}/rke2.sh"
+      environment:
+        INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+        INSTALL_RKE2_CHANNEL_URL: "{{ rke2_channel_url }}"
+        INSTALL_RKE2_CHANNEL: "{{ rke2_channel }}"
+        INSTALL_RKE2_METHOD: "{{ rke2_method }}"
+      changed_when: false
+      when: not rke2_airgap_mode
+
+- name: Copier les manifestes personnalisés
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "{{ rke2_data_path }}/server/manifests/"
+    owner: root
+    group: root
+    mode: 0644
+  with_items: "{{ rke2_custom_manifests }}"
+  when: rke2_custom_manifests | length > 0
+
+- name: Copier les pods statiques
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ rke2_data_path }}/agent/pod-manifests/"
+    owner: root
+    group: root
+    mode: 0644
+  with_items: "{{ rke2_static_pods }}"
+  when: rke2_static_pods
+
+- name: Copier le fichier d'environnement RKE2
+  ansible.builtin.template:
+    src: rke2_environment.j2
+    dest: "/etc/default/rke2-{{ rke2_type }}"
+    owner: root
+    group: root
+    mode: 0644
+  when:
+    - rke2_environment_options is defined
+    - rke2_environment_options|length > 0

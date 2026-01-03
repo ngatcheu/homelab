@@ -1,0 +1,15 @@
+---
+all:
+  children:
+    k8s_cluster:
+      children:
+        masters:
+          vars:
+            rke2_type: "server"
+          hosts:
+            devsecops-kub-d-5:
+              ansible_host: 192.168.1.105
+            devsecops-kub-d-6:
+              ansible_host: 192.168.1.106
+            devsecops-kub-d-7:
+              ansible_host: 192.168.1.107

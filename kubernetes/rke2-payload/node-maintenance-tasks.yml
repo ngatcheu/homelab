@@ -1,0 +1,149 @@
+# Tâches de maintenance pour cordon/drain/reboot/uncordon
+# Ce fichier est inclus par le handler principal quand un reboot est nécessaire
+
+- name: "Maintenance - Cordon node"
+  ansible.builtin.command:
+    cmd: "{{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} cordon {{ inventory_hostname }}"
+  delegate_to: "{{ groups['masters'][0] }}"
+  when: inventory_hostname in groups['workers']
+  register: cordon_result
+  changed_when: "'cordoned' in cordon_result.stdout"
+
+- name: "Maintenance - Verify node is cordoned"
+  ansible.builtin.command:
+    cmd: "{{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} get node {{ inventory_hostname }} --no-headers"
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: cordon_check
+  until: "'SchedulingDisabled' in cordon_check.stdout"
+  retries: 10
+  delay: 2
+  when: inventory_hostname in groups['workers']
+  changed_when: false
+
+- name: "Maintenance - Display cordon status"
+  ansible.builtin.debug:
+    msg: "✅ Node {{ inventory_hostname }} successfully cordoned - SchedulingDisabled"
+  when:
+    - inventory_hostname in groups['workers']
+    - cordon_check is succeeded
+
+- name: "Maintenance - Drain node with graceful termination"
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} drain {{ inventory_hostname }}
+      --ignore-daemonsets --delete-emptydir-data
+      --timeout={{ drain_timeout }}s --force=true
+      --grace-period={{ grace_period }}
+  delegate_to: "{{ groups['masters'][0] }}"
+  when: inventory_hostname in groups['workers']
+  register: drain_result
+  changed_when: "'drained' in drain_result.stdout"
+
+- name: "Maintenance - Verify drain completed - only DaemonSet and Static pods should remain"
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} get pods --all-namespaces
+      --field-selector=spec.nodeName={{ inventory_hostname }},status.phase=Running
+      -o custom-columns="NAME:.metadata.name,TYPE:.metadata.ownerReferences[0].kind" --no-headers |
+      grep -v -E "(DaemonSet|Node)" || true
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: non_system_pods
+  until: non_system_pods.stdout | trim == ""
+  retries: "{{ (drain_timeout / 10) | int }}"
+  delay: 10
+  when: inventory_hostname in groups['workers']
+  changed_when: false
+
+- name: "Maintenance - Display remaining system pods (for information)"
+  ansible.builtin.shell:
+    cmd: >-
+      {{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} get pods --all-namespaces
+      --field-selector=spec.nodeName={{ inventory_hostname }},status.phase=Running
+      -o custom-columns="NAMESPACE:.metadata.namespace,NAME:.metadata.name,TYPE:.metadata.ownerReferences[0].kind" --no-headers
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: remaining_pods_info
+  when: inventory_hostname in groups['workers']
+  changed_when: false
+
+- name: "Maintenance - Show drain verification result"
+  ansible.builtin.debug:
+    msg: |
+      ✅ Drain completed successfully on {{ inventory_hostname }}
+      Only system pods remain (DaemonSets + Static pods):
+      {{ remaining_pods_info.stdout | default('No pods found') }}
+  when:
+    - inventory_hostname in groups['workers']
+    - remaining_pods_info is defined
+
+- name: "Maintenance - Reboot node if required"
+  ansible.builtin.reboot:
+
+- name: "Maintenance - Uncordon node"
+  ansible.builtin.command:
+    cmd: "{{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} uncordon {{ inventory_hostname }}"
+  delegate_to: "{{ groups['masters'][0] }}"
+  when: inventory_hostname in groups['workers']
+  register: uncordon_result
+  changed_when: "'uncordoned' in uncordon_result.stdout"
+
+- name: "Maintenance - Verify node is uncordoned"
+  ansible.builtin.command:
+    cmd: "{{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} get node {{ inventory_hostname }} --no-headers"
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: uncordon_check
+  until: "'SchedulingDisabled' not in uncordon_check.stdout"
+  retries: 10
+  delay: 2
+  when: inventory_hostname in groups['workers']
+  changed_when: false
+
+- name: "Maintenance - Display uncordon status"
+  ansible.builtin.debug:
+    msg: "✅ Node {{ inventory_hostname }} successfully uncordoned - Ready for scheduling"
+  when:
+    - inventory_hostname in groups['workers']
+    - uncordon_check is succeeded
+
+- name: "Maintenance - Wait for node to be Ready"
+  ansible.builtin.command:
+    cmd: "{{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} get node {{ inventory_hostname }}"
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: node_status
+  until: "'Ready' in node_status.stdout and 'NotReady' not in node_status.stdout"
+  retries: "{{ (node_ready_timeout / 10) | int }}"
+  delay: 10
+  changed_when: false
+
+- name: "Maintenance - Wait for all pods to be Ready before proceeding to next node"
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} get pods --all-namespaces
+      -o custom-columns="PHASE:.status.phase,READY:.status.conditions[?(@.type=='Ready')].status" --no-headers |
+      grep -v -E "(Succeeded|Failed)" |
+      awk '$2 != "True"' | wc -l
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: not_ready_pods_count
+  until: not_ready_pods_count.stdout | int == 0
+  retries: "{{ (pod_ready_timeout / 10) | int }}"
+  delay: 10
+  changed_when: false
+
+- name: "Maintenance - Debug: Show pod status summary"
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ kubectl_path }}/kubectl --kubeconfig={{ kubeconfig_path }} get pods --all-namespaces
+      -o custom-columns="PHASE:.status.phase" --no-headers | sort | uniq -c
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: pod_status_summary
+  changed_when: false
+
+- name: "Maintenance - Display maintenance completion status"
+  ansible.builtin.debug:
+    msg: |
+      ✅ Node {{ inventory_hostname }} maintenance completed successfully!
+      🔍 All active pods are Ready - safe to proceed to next node
+      📊 Pod status summary: {{ pod_status_summary.stdout_lines | default(['No data']) | join(', ') }}
+      ⏭️  Ready for next node maintenance

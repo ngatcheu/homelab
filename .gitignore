@@ -1,0 +1,60 @@
+# Kubeconfig files (contain sensitive credentials)
+rke2.yaml
+rke2-rancher.yaml
+rke2-payload.yaml
+**/rke2.yaml
+**/kubeconfig.yaml
+**/kube_config_cluster.yml
+
+# Ansible Vault password files
+.vault_pass
+**/.vault_pass
+
+# Ansible retry files
+*.retry
+
+# Terraform state files (contain sensitive data)
+*.tfstate
+*.tfstate.*
+*.tfvars
+!terraform.tfvars.example
+
+# Terraform directories
+**/.terraform/
+**/.terraform.lock.hcl
+
+# SSH keys
+*.pem
+*.key
+id_rsa*
+!*.key.example
+
+# Environment files
+.env
+.env.local
+**/.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Log files
+*.log
+logs/
+
+# Backup files
+*.bak
+*.backup
+
+# Secrets and credentials
+secrets.yaml
+credentials.yaml
+!secrets.yaml.example
+!credentials.yaml.example

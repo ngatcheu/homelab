@@ -1,0 +1,198 @@
+---
+- name: Créer le répertoire de configuration RKE2
+  ansible.builtin.file:
+    state: directory
+    path: /etc/rancher/rke2
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Définir les taints du serveur
+  ansible.builtin.set_fact:
+    combined_node_taints: "{{ rke2_server_node_taints }}"
+  when: rke2_type == 'server'
+
+- name: Copier la configuration rke2
+  ansible.builtin.template:
+    src: "{{ rke2_config }}"
+    dest: /etc/rancher/rke2/config.yaml
+    owner: root
+    group: root
+    mode: 0600
+  notify: "Config file changed"
+
+- name: Copier la configuration kubelet
+  ansible.builtin.template:
+    src: templates/kubelet-config.yaml.j2
+    dest: /etc/rancher/rke2/kubelet-config.yaml
+    owner: root
+    group: root
+    mode: 0600
+  when: rke2_kubelet_config | length > 0
+  notify: "Config file changed"
+
+- name: Copier le fichier de configuration du registre Containerd
+  ansible.builtin.template:
+    src: "{{ rke2_custom_registry_path }}"
+    dest: /etc/rancher/rke2/registries.yaml
+    owner: root
+    group: root
+    mode: 0600
+  when: (rke2_custom_registry_mirrors | length > 0 or rke2_custom_registry_configs | length > 0)
+  notify: "Config file changed"
+
+- name: Enregistrer si nous devons effectuer une restauration etcd depuis un fichier
+  ansible.builtin.set_fact:
+    do_etcd_restore: true
+  when: (rke2_etcd_snapshot_file | length > 0) and ((ansible_facts.services['rke2-server.service'] is not defined) or (ansible_facts.services['rke2-server.service']['status'] == 'disabled'))
+
+- name: Enregistrer si nous devons effectuer une restauration etcd depuis s3
+  ansible.builtin.set_fact:
+    do_etcd_restore_from_s3: true
+  when:
+    - rke2_etcd_snapshot_file | length > 0
+    - rke2_etcd_snapshot_s3_options is defined
+    - rke2_etcd_snapshot_s3_options.access_key
+    - rke2_etcd_snapshot_s3_options.secret_key
+    - rke2_etcd_snapshot_s3_options.bucket
+    - rke2_etcd_snapshot_s3_options.snapshot_name
+
+- name: Restaurer etcd depuis un fichier
+  when: do_etcd_restore is defined
+  block:
+    - name: Créer le répertoire des snapshots etcd RKE2
+      ansible.builtin.file:
+        state: directory
+        path: "{{ rke2_etcd_snapshot_destination_dir }}"
+        recurse: true
+        mode: 0755
+    - name: Copier le fichier de snapshot etcd
+      ansible.builtin.copy:
+        src: "{{ rke2_etcd_snapshot_source_dir }}/{{ rke2_etcd_snapshot_file }}"
+        dest: "{{ rke2_etcd_snapshot_destination_dir }}/{{ rke2_etcd_snapshot_file }}"
+        mode: 0644
+        force: true
+    - name: Restaurer etcd depuis un snapshot
+      ansible.builtin.shell: |
+        rke2 server \
+        --cluster-reset \
+        --cluster-reset-restore-path="{{ rke2_etcd_snapshot_destination_dir }}/{{ rke2_etcd_snapshot_file }}" \
+        --token {{ rke2_token }}
+      register: task_output # <- Enregistre la sortie de la commande.
+      changed_when: task_output.rc != 0 # <- Utilise le code de retour pour définir quand la tâche a changé.
+      when: not ansible_check_mode
+
+- name: Restaurer etcd depuis s3
+  when: do_etcd_restore_from_s3 is defined
+  block:
+    - name: Restaurer etcd depuis un snapshot s3
+      ansible.builtin.shell: |
+        rke2 server \
+        --cluster-reset \
+        --etcd-s3 \
+        --cluster-reset-restore-path="{{ rke2_etcd_snapshot_s3_options.snapshot_name }}" \
+        --etcd-s3-bucket="{{ rke2_etcd_snapshot_s3_options.bucket }}" \
+        --etcd-s3-access-key="{{ rke2_etcd_snapshot_s3_options.access_key }}" \
+        --etcd-s3-secret-key="{{ rke2_etcd_snapshot_s3_options.secret_key }}" \
+        --etcd-s3-endpoint="{{ rke2_etcd_snapshot_s3_options.s3_endpoint }}" \
+        {{ ('--etcd-s3-region=' + rke2_etcd_snapshot_s3_options.region) if rke2_etcd_snapshot_s3_options.region is defined else '' }} \
+        {{ ('--etcd-s3-endpoint-ca=' + rke2_etcd_snapshot_s3_options.endpoint_ca) if rke2_etcd_snapshot_s3_options.endpoint_ca is defined else '' }} \
+        {{ ('--etcd-s3-folder=' + rke2_etcd_snapshot_s3_options.folder) if rke2_etcd_snapshot_s3_options.folder is defined else '' }} \
+        {{ ('--etcd-s3-skip-ssl-verify=' + rke2_etcd_snapshot_s3_options.skip_ssl_verify) if rke2_etcd_snapshot_s3_options.skip_ssl_verify is defined else '' }} \
+        --token {{ rke2_token }}
+      register: task_output # <- Enregistre la sortie de la commande.
+      changed_when: task_output.rc != 0 # <- Utilise le code de retour pour définir quand la tâche a changé.
+      when: not ansible_check_mode
+
+- name: Démarrer le service RKE2 sur le premier serveur
+  ansible.builtin.systemd:
+    name: "rke2-server.service"
+    state: started
+    enabled: true
+  environment:
+    RKE2_TOKEN: "{{ rke2_token }}"
+  notify: "Service (re)started"
+
+- name: Masquer le service agent RKE2 sur le premier serveur
+  ansible.builtin.systemd:
+    name: "rke2-agent.service"
+    enabled: false
+    masked: true
+
+- name: Attendre que le premier serveur soit prêt - sans CNI
+  ansible.builtin.shell: |
+    {{ rke2_data_path }}/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get node "{{ rke2_node_name }}" -o jsonpath='{range .status.conditions[*]}{.message}{"\n"}{end}'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: node_status
+  until:
+    - '"kubelet has sufficient memory available"  in node_status.stdout_lines'
+    - '"kubelet has no disk pressure"  in node_status.stdout_lines'
+    - '"kubelet has sufficient PID available"  in node_status.stdout_lines'
+    - ("cni plugin not initialized" in node_status.stdout) or ("kubelet is posting ready status." in node_status.stdout)
+  retries: 100
+  delay: 15
+  when:
+    - not ansible_check_mode
+    - rke2_cni == 'none'
+
+- name: Attendre que le premier serveur soit prêt - avec CNI
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ rke2_data_path }}/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes | grep "{{ rke2_node_name }}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: first_server
+  until: '" Ready "  in first_server.stdout'
+  retries: 40
+  delay: 15
+  when:
+    - not ansible_check_mode
+    - rke2_cni != 'none'
+
+- name: Restaurer etcd
+  when: do_etcd_restore is defined or do_etcd_restore_from_s3 is defined
+  block:
+    - name: Obtenir les nœuds enregistrés
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          {{ rke2_data_path }}/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml \
+          get nodes --no-headers | awk '{print $1}'
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: registered_node_names
+
+    - name: Obtenir tous les noms de nœuds
+      ansible.builtin.set_fact:
+        node_names: "{{ hostvars | dict2items | map(attribute='value.rke2_node_name') }}"
+      run_once: true
+      register: node_names
+
+    - name: Supprimer les anciens secrets <node>.node-password.rke2
+      ansible.builtin.shell: |
+        {{ rke2_data_path }}/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml \
+        delete secret {{ item }}.node-password.rke2 -n kube-system 2>&1 || true
+      args:
+        executable: /bin/bash
+      with_items: "{{ registered_node_names.stdout_lines | difference(node_names) }}"
+      changed_when: false
+
+    - name: Supprimer les anciens nœuds
+      ansible.builtin.shell: |
+        {{ rke2_data_path }}/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml \
+        delete node {{ item }} 2>&1 || true
+      args:
+        executable: /bin/bash
+      with_items: "{{ registered_node_names.stdout_lines | difference(node_names) }}"
+      changed_when: false
+
+- name: Définir la variable Serveur Actif
+  ansible.builtin.set_fact:
+    active_server: "{{ inventory_hostname }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ groups[rke2_cluster_group_name] }}"
